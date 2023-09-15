@@ -1,8 +1,10 @@
 use std::{
     env, fmt,
-    path::{Path, PathBuf},
-    process::Command,
+    path::PathBuf,
+    process::{exit, Command},
 };
+
+use git2::{Error, ObjectType, Repository};
 
 struct Arguments {
     file_path: String,
@@ -17,6 +19,26 @@ impl fmt::Display for Arguments {
             f,
             "({}, {}, {}, {})",
             self.file_path, self.name, self.email, self.single_folder
+        )
+    }
+}
+
+struct RepositoryInfo {
+    path: PathBuf,
+    total_commits: i64,
+    user_commits: i64,
+    contribution_percentage: f64,
+}
+
+impl fmt::Display for RepositoryInfo {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "Repository: {:?}. Total commits: {}.\nYour contribution: {:.2}%, {} commits.",
+            self.path.parent().unwrap().file_name().unwrap(),
+            self.total_commits,
+            self.contribution_percentage * 100.0,
+            self.user_commits
         )
     }
 }
@@ -107,6 +129,48 @@ fn find_repositories(path: PathBuf) -> Vec<PathBuf> {
     repositories
 }
 
+fn analyze_repository(
+    path: PathBuf,
+    match_name: &String,
+    match_email: &String,
+) -> Result<RepositoryInfo, Error> {
+    let repo = Repository::open(&path)?;
+    let odb = repo.odb()?;
+
+    let mut total_commits: i64 = 0;
+    let mut user_commits: i64 = 0;
+
+    let user_commit_prefix = format!("committer {} <{}>", match_name, match_email);
+
+    odb.foreach(|oid| {
+        let obj = odb.read(*oid).unwrap();
+
+        if obj.kind() == ObjectType::Commit {
+            let obj_data = String::from_utf8_lossy(&obj.data());
+            let committer = obj_data
+                .split("\n")
+                .skip_while(|line| !line.starts_with("committer"))
+                .next()
+                .unwrap_or_default();
+
+            total_commits += 1;
+
+            if committer.starts_with(&user_commit_prefix) {
+                user_commits += 1;
+            }
+        }
+
+        true
+    })?;
+
+    Ok(RepositoryInfo {
+        path: path.canonicalize().unwrap_or(path),
+        total_commits,
+        user_commits,
+        contribution_percentage: user_commits as f64 / total_commits as f64,
+    })
+}
+
 fn main() {
     let mut args: Arguments = get_arguments();
 
@@ -121,6 +185,20 @@ fn main() {
     let current_dir = env::current_dir().unwrap();
     let repositories: Vec<PathBuf> = find_repositories(current_dir.join(&args.file_path));
 
-    println!("{}", args);
-    println!("{:#?}", repositories);
+    if repositories.len() == 0 {
+        println!("No git repository was found.");
+        exit(0);
+    }
+
+    for repository in repositories {
+        let info = analyze_repository(repository, &args.name, &args.email);
+
+        match info {
+            Ok(info) => println!("{}", info),
+            Err(err) => {
+                println!("There was an error when analyzing repository");
+                println!("Error: {}", err);
+            }
+        }
+    }
 }
