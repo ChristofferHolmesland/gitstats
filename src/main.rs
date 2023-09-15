@@ -1,4 +1,4 @@
-use std::{env, fmt};
+use std::{env, fmt, process::Command};
 
 struct Arguments {
     file_path: String,
@@ -66,8 +66,31 @@ fn get_arguments() -> Arguments {
     }
 }
 
+fn get_git_config_property(property: &str) -> String {
+    let output = Command::new("git")
+        .arg("config")
+        .arg("--get")
+        .arg(property)
+        .output()
+        .expect("Failed to get config value from git command. Make sure user.name and user.email are set or supply them as arguments with name=<name> and email=<email>.");
+
+    if !output.status.success() {
+        panic!("Failed to get config value from git command. Make sure user.name and user.email are set or supply them as arguments with name=<name> and email=<email>.");
+    }
+
+    String::from_utf8_lossy(&output.stdout).trim().to_string()
+}
+
 fn main() {
-    let args: Arguments = get_arguments();
+    let mut args: Arguments = get_arguments();
+
+    if args.email == "" {
+        args.email = get_git_config_property("user.email");
+    }
+
+    if args.name == "" {
+        args.name = get_git_config_property("user.name")
+    }
 
     println!("{}", args);
 }
