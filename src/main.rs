@@ -1,4 +1,8 @@
-use std::{env, fmt, process::Command};
+use std::{
+    env, fmt,
+    path::{Path, PathBuf},
+    process::Command,
+};
 
 struct Arguments {
     file_path: String,
@@ -81,6 +85,28 @@ fn get_git_config_property(property: &str) -> String {
     String::from_utf8_lossy(&output.stdout).trim().to_string()
 }
 
+fn find_repositories(path: PathBuf) -> Vec<PathBuf> {
+    let mut repositories = Vec::new();
+
+    for entry in path.read_dir().expect("Failed to read file path") {
+        if let Ok(entry) = entry {
+            let entry_path = entry.path();
+
+            if !entry_path.is_dir() {
+                continue;
+            }
+
+            if entry_path.file_name().unwrap() == ".git" {
+                repositories.push(entry_path);
+            } else {
+                repositories.extend(find_repositories(entry_path));
+            }
+        }
+    }
+
+    repositories
+}
+
 fn main() {
     let mut args: Arguments = get_arguments();
 
@@ -92,5 +118,9 @@ fn main() {
         args.name = get_git_config_property("user.name")
     }
 
+    let current_dir = env::current_dir().unwrap();
+    let repositories: Vec<PathBuf> = find_repositories(current_dir.join(&args.file_path));
+
     println!("{}", args);
+    println!("{:#?}", repositories);
 }
